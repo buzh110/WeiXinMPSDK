@@ -1,8 +1,19 @@
-﻿using System;
+﻿/*----------------------------------------------------------------
+    Copyright (C) 2016 Senparc
+    
+    文件名：MenuController.cs
+    文件功能描述：自定义菜单设置工具Controller
+    
+    
+    创建标识：Senparc - 20150312
+----------------------------------------------------------------*/
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
 using System.Web.Mvc;
+using Senparc.Weixin.Entities;
 using Senparc.Weixin.MP.CommonAPIs;
 using Senparc.Weixin.MP.Entities;
 using Senparc.Weixin.MP.Entities.Menu;
@@ -16,7 +27,7 @@ namespace Senparc.Weixin.MP.Sample.Controllers
 
         public ActionResult Index()
         {
-            GetMenuResult result = new GetMenuResult();
+            GetMenuResult result = new GetMenuResult(new ButtonGroup());
 
             //初始化
             for (int i = 0; i < 3; i++)
@@ -36,14 +47,14 @@ namespace Senparc.Weixin.MP.Sample.Controllers
         {
             try
             {
-                if (!AccessTokenContainer.CheckRegistered(appId))
-                {
-                    AccessTokenContainer.Register(appId, appSecret);
-                }
-                var result = AccessTokenContainer.GetTokenResult(appId); //CommonAPIs.CommonApi.GetToken(appId, appSecret);
+                //if (!AccessTokenContainer.CheckRegistered(appId))
+                //{
+                //    AccessTokenContainer.Register(appId, appSecret);
+                //}
+                var result = CommonAPIs.CommonApi.GetToken(appId, appSecret);//AccessTokenContainer.GetTokenResult(appId);
 
                 //也可以直接一步到位：
-                //var result = AccessTokenContainer.TryGetToken(appId, appSecret);
+                //var result = AccessTokenContainer.TryGetAccessToken(appId, appSecret);
                 return Json(result, JsonRequestBehavior.AllowGet);
             }
             catch (Exception)
@@ -54,23 +65,42 @@ namespace Senparc.Weixin.MP.Sample.Controllers
         }
 
         [HttpPost]
-        public ActionResult CreateMenu(string token, GetMenuResultFull resultFull)
+        public ActionResult CreateMenu(string token, GetMenuResultFull resultFull, MenuMatchRule menuMatchRule)
         {
+                var useAddCondidionalApi = menuMatchRule != null && !menuMatchRule.CheckAllNull();
+            var apiName = string.Format("使用接口：{0}。" , (useAddCondidionalApi ? "个性化菜单接口" : "普通自定义菜单接口"));
             try
             {
                 //重新整理按钮信息
-                var bg = CommonAPIs.CommonApi.GetMenuFromJsonResult(resultFull).menu;
-                var result = CommonAPIs.CommonApi.CreateMenu(token, bg);
+                WxJsonResult result = null;
+                IButtonGroupBase buttonGroup = null;
+                if (useAddCondidionalApi)
+                {
+                    //个性化接口
+                    buttonGroup = CommonAPIs.CommonApi.GetMenuFromJsonResult(resultFull, new ConditionalButtonGroup()).menu;
+
+                    var addConditionalButtonGroup = buttonGroup as ConditionalButtonGroup;
+                    addConditionalButtonGroup.matchrule = menuMatchRule;
+                    result = CommonAPIs.CommonApi.CreateMenuConditional(token, addConditionalButtonGroup);
+                    apiName += string.Format("menuid：{0}。", (result as CreateMenuConditionalResult).menuid);
+                }
+                else
+                {
+                    //普通接口
+                    buttonGroup = CommonAPIs.CommonApi.GetMenuFromJsonResult(resultFull,new ButtonGroup()).menu;
+                    result = CommonAPIs.CommonApi.CreateMenu(token, buttonGroup);
+                }
+
                 var json = new
                 {
                     Success = result.errmsg == "ok",
-                    Message = result.errmsg
+                    Message = "菜单更新成功。"+ apiName
                 };
                 return Json(json);
             }
             catch (Exception ex)
             {
-                var json = new { Success = false, Message = ex.Message };
+                var json = new { Success = false, Message =string.Format("更新失败：{0}。{1}",ex.Message, apiName) };
                 return Json(json);
             }
         }
@@ -91,10 +121,10 @@ namespace Senparc.Weixin.MP.Sample.Controllers
             {
                 var result = CommonAPIs.CommonApi.DeleteMenu(token);
                 var json = new
-                               {
-                                   Success = result.errmsg == "ok",
-                                   Message = result.errmsg
-                               };
+                {
+                    Success = result.errmsg == "ok",
+                    Message = result.errmsg
+                };
                 return Json(json, JsonRequestBehavior.AllowGet);
             }
             catch (Exception ex)
